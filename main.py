@@ -3,14 +3,14 @@ if not hasattr(collections, "Mapping"):
     import collections.abc
     collections.Mapping = collections.abc.Mapping
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 import requests
 from typing import List
 import logging
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Создаем FastAPI приложение
 app = FastAPI()
@@ -29,10 +29,30 @@ class VacancyResponse(BaseModel):
     to_salary: int
     currency: str
 
+# Логирование всех запросов
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Миддлвэр для логирования всех входящих запросов."""
+    # Логируем метод и URL запроса
+    logging.info(f"Получен запрос: {request.method} {request.url}")
+    try:
+        # Логируем тело запроса, если оно доступно
+        body = await request.json()
+        logging.info(f"Тело запроса: {body}")
+    except Exception:
+        logging.info("Тело запроса: отсутствует или недоступно")
+    
+    # Передаем запрос дальше
+    response = await call_next(request)
+    return response
+
 # Эндпоинт для поиска вакансий
 @app.post("/find_jobs", response_model=List[VacancyResponse])
 async def find_jobs(request: JobSearchRequest):
     """Обработчик поиска вакансий по зарплате и ключевому слову (text)."""
+    # Логируем структуру запроса
+    logging.info(f"Получен запрос find_jobs с данными: {request.dict()}")
+    
     salary = request.salary  # Используем зарплату из запроса
     text = request.text  # Используем текстовый запрос для поиска
     

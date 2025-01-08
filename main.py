@@ -28,6 +28,7 @@ class VacancyResponse(BaseModel):
     from_salary: int
     to_salary: int
     currency: str
+    link: str  # Добавляем ссылку на вакансию
 
 # Логирование всех запросов
 @app.middleware("http")
@@ -60,7 +61,7 @@ async def find_jobs(request: JobSearchRequest):
     params = {
         "text": text,  # Передаем текст для поиска по вакансиям
         "salary": salary,  # Указываем желаемую зарплату
-        "per_page": 50,  # Количество вакансий на странице
+        "per_page": 25,  # Количество вакансий на странице
     }
     
     try:
@@ -97,8 +98,11 @@ async def find_jobs(request: JobSearchRequest):
         salary_to = salary.get("to") if salary else None
         salary_currency = salary.get("currency", "RUR") if salary else "RUR"
         
+        # Получаем ссылку на вакансию
+        link = vacancy.get("alternate_url", "")
+        
         # Логируем данные о вакансии
-        logging.info(f"Вакансия: {position}, Компания: {company}, Город: {location}, Зарплата: {salary_from} - {salary_to} {salary_currency}")
+        logging.info(f"Вакансия: {position}, Компания: {company}, Город: {location}, Зарплата: {salary_from} - {salary_to} {salary_currency}, Ссылка: {link}")
         
         # Формируем объект вакансии для ответа
         vacancies.append(VacancyResponse(
@@ -107,7 +111,8 @@ async def find_jobs(request: JobSearchRequest):
             location=location,
             from_salary=salary_from if salary_from is not None else 0,  # Если не указана, ставим 0
             to_salary=salary_to if salary_to is not None else 0,  # Если не указана, ставим 0
-            currency=salary_currency
+            currency=salary_currency,
+            link=link  # Добавляем ссылку на вакансию
         ))
     
     return vacancies

@@ -20,6 +20,7 @@ app = FastAPI()
 class JobSearchRequest(BaseModel):
     salary: int  # Ожидаем зарплату как число
     text: str  # Текстовый запрос для поиска по ключевым словам (например, должность)
+    location: str  # Добавляем местоположение пользователя
 
 # Модели данных для вакансий
 class VacancyResponse(BaseModel):
@@ -31,24 +32,7 @@ class VacancyResponse(BaseModel):
     currency: str
     link: str  # Добавляем ссылку на вакансию
 
-# Логирование всех запросов
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Миддлвэр для логирования всех входящих запросов."""
-    # Логируем метод и URL запроса
-    logging.info(f"Получен запрос: {request.method} {request.url}")
-    try:
-        # Логируем тело запроса, если оно доступно
-        body = await request.json()
-        logging.info(f"Тело запроса: {body}")
-    except Exception:
-        logging.info("Тело запроса: отсутствует или недоступно")
-    
-    # Передаем запрос дальше
-    response = await call_next(request)
-    return response
-
-# Факты и движок знаний
+# Определение фактов
 class User(Fact):
     """Карточка пользователя."""
     salaryPrefer: int
@@ -58,6 +42,8 @@ class Vacancy(Fact):
     position: str
     company: str
     location: str
+    experience: str
+    url: str
     from_salary: int
     to_salary: int
 
@@ -70,9 +56,12 @@ class AnswerVacancies(Fact):
     position: str
     company: str
     location: str
+    experience: str
+    url: str
     from_salary: int
     to_salary: int
 
+# Движок правил
 class VacancyEngine(KnowledgeEngine):
     @Rule(
         User(salaryPrefer=MATCH.salaryPrefer),
@@ -81,103 +70,112 @@ class VacancyEngine(KnowledgeEngine):
             position=MATCH.position,
             company=MATCH.company,
             location=MATCH.location,
+            experience=MATCH.experience,
+            url=MATCH.url,
             from_salary=MATCH.from_salary,
             to_salary=MATCH.to_salary,
         ),
         TEST(lambda salaryPrefer, from_salary, to_salary, inputLocation, location:
-             salaryPrefer >= from_salary and salaryPrefer <= to_salary and location == inputLocation)
+             (from_salary or 0) <= salaryPrefer <= (to_salary or float('inf')) and location == inputLocation)
     )
-    def job_matching_by_salary_and_location(self, salaryPrefer, inputLocation, position, company, location, from_salary, to_salary):
+    def job_matching_by_salary_and_location(self, salaryPrefer, inputLocation, position, company, location, experience, url, from_salary, to_salary):
         """Подбор вакансий по зарплате и местоположению одновременно."""
         self.declare(
             AnswerVacancies(
                 position=position,
                 company=company,
                 location=location,
-                from_salary=from_salary,
-                to_salary=to_salary,
+                experience=experience,
+                url=url,
+                from_salary=from_salary or 0,
+                to_salary=to_salary or 0,
             )
         )
+
+# Логирование всех запросов
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Миддлвэр для логирования всех входящих запросов."""
+    logging.info(f"Получен запрос: {request.method} {request.url}")
+    try:
+        body = await request.json()
+        logging.info(f"Тело запроса: {body}")
+    except Exception:
+        logging.info("Тело запроса: отсутствует или недоступно")
+    
+    response = await call_next(request)
+    return response
 
 # Эндпоинт для поиска вакансий
 @app.post("/find_jobs", response_model=List[VacancyResponse])
 async def find_jobs(request: JobSearchRequest):
-    """Обработчик поиска вакансий по зарплате и ключевому слову (text)."""
-    # Логируем структуру запроса
-    logging.info(f"Получен запрос find_jobs с данными: {request.dict()}")
-    
-    salary = request.salary  # Используем зарплату из запроса
-    text = request.text  # Используем текстовый запрос для поиска
-    
+    """Обработчик поиска вакансий по зарплате, ключевому слову и местоположению."""
+    salary = request.salary
+    text = request.text
+    location = request.location
+
+    # Запрашиваем вакансии через API HH
     url = "https://api.hh.ru/vacancies"
     params = {
-        "text": text,  # Передаем текст для поиска по вакансиям
-        "salary": salary,  # Указываем желаемую зарплату
-        "per_page": 25,  # Количество вакансий на странице
+        "text": text,
+        "salary": salary,
+        "per_page": 25,
     }
     
     try:
-        logging.info(f"Запрос к API HH с параметрами: {params}")
         response = requests.get(url, params=params)
-        
-        # Проверка на успешный статус ответа
         response.raise_for_status()
-        logging.info(f"Ответ от API HH: {response.status_code}")
-        
     except requests.exceptions.RequestException as e:
-        logging.error(f"Ошибка при запросе к API HH: {str(e)}")
-        raise HTTPException(status_code=500, detail="Ошибка при получении данных с HH")
+        raise HTTPException(status_code=500, detail=f"Ошибка при запросе к API HH: {e}")
     
-    vacancies_data = response.json()  # Получаем данные из ответа API
-    
-    # Логируем, что пришло в ответе
-    logging.info(f"Ответ от HH: {vacancies_data}")
-    
+    vacancies_data = response.json()
     if "items" not in vacancies_data or not vacancies_data["items"]:
-        logging.warning("Нет вакансий в ответе.")
         return []  # Если вакансий нет в ответе, возвращаем пустой список
-    
-    # Обрабатываем данные, чтобы вернуть только нужные поля
-    vacancies = []
+
+    # Инициализируем движок правил
     engine = VacancyEngine()
     engine.reset()
 
-    for vacancy in vacancies_data.get("items", []):
-        position = vacancy.get("name")
-        company = vacancy.get("employer", {}).get("name")
-        location = vacancy.get("area", {}).get("name")
+    # Добавляем данные пользователя и местоположение
+    engine.declare(User(salaryPrefer=salary))
+    engine.declare(InputLocation(inputLocation=location))
+
+    # Загружаем вакансии в движок
+    for vacancy in vacancies_data["items"]:
+        position = vacancy.get("name", "")
+        company = vacancy.get("employer", {}).get("name", "")
+        vacancy_location = vacancy.get("area", {}).get("name", "")
+        experience = vacancy.get("snippet", {}).get("requirement", "Не указано")
+        url = vacancy.get("alternate_url", "")
+        salary_data = vacancy.get("salary", {})
+        from_salary = salary_data.get("from")
+        to_salary = salary_data.get("to")
         
-        # Проверка на наличие поля salary
-        salary = vacancy.get("salary", {})
-        salary_from = salary.get("from") if salary else None
-        salary_to = salary.get("to") if salary else None
-        
-        # Добавляем факт о вакансии в движок знаний
         engine.declare(Vacancy(
             position=position,
             company=company,
-            location=location,
-            from_salary=salary_from if salary_from is not None else 0,
-            to_salary=salary_to if salary_to is not None else 0,
+            location=vacancy_location,
+            experience=experience,
+            url=url,
+            from_salary=from_salary,
+            to_salary=to_salary,
         ))
 
-    # Добавляем факт о пользователе и местоположении
-    engine.declare(User(salaryPrefer=salary))
-    engine.declare(InputLocation(inputLocation="Москва"))  # Для примера: фиксированное значение
-
+    # Запускаем движок правил
     engine.run()
 
-    # Извлекаем результаты из движка знаний
+    # Собираем подходящие вакансии
+    results = []
     for fact in engine.facts.values():
         if isinstance(fact, AnswerVacancies):
-            vacancies.append(VacancyResponse(
-                position=fact["position"],
-                company=fact["company"],
-                location=fact["location"],
-                from_salary=fact["from_salary"],
-                to_salary=fact["to_salary"],
-                currency="RUR",  # Используем фиксированную валюту для примера
-                link=""  # Нет данных о ссылке в данном примере
-            ))
-    
-    return vacancies
+            results.append({
+                "position": fact["position"],
+                "company": fact["company"],
+                "location": fact["location"],
+                "from_salary": fact["from_salary"],
+                "to_salary": fact["to_salary"],
+                "currency": "RUR",  # Можно заменить на фактическую валюту, если доступна
+                "link": fact["url"],
+            })
+
+    return results

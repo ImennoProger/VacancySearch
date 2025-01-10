@@ -92,16 +92,19 @@ class VacancyEngine(KnowledgeEngine):
             )
         )
 
-# Логирование всех запросов
+# Middleware для логирования запросов
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Миддлвэр для логирования всех входящих запросов."""
+    """Логирование всех запросов, включая заголовки и тело."""
     logging.info(f"Получен запрос: {request.method} {request.url}")
+    headers = dict(request.headers)
+    logging.info(f"Заголовки запроса: {headers}")
+    
     try:
         body = await request.json()
         logging.info(f"Тело запроса: {body}")
     except Exception:
-        logging.info("Тело запроса: отсутствует или недоступно")
+        logging.info("Тело запроса отсутствует или не может быть прочитано.")
     
     response = await call_next(request)
     return response

@@ -72,8 +72,6 @@ async def log_requests(request: Request, call_next):
 # Эндпоинт поиска авиабилетов
 @app.post("/search_flights", response_model=List[FlightResponse])
 async def search_flights(request: FlightSearchRequest):
-    departure_at = request.departure_at.split("T")[0] if request.departure_at else None
-    return_at = request.return_at.split("T")[0] if request.return_at else None
     token = "74d50d2720af4296189110fe2639ae75"
     api_url = (
         f"https://api.travelpayouts.com/aviasales/v3/prices_for_dates?"

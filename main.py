@@ -1,13 +1,14 @@
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-from experta import Fact, KnowledgeEngine, Rule, MATCH, TEST
-from typing import List
-import requests
-import logging
 import collections
 if not hasattr(collections, "Mapping"):
     import collections.abc
     collections.Mapping = collections.abc.Mapping
+
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
+import requests
+from typing import List, Optional
+import logging
+from experta import Fact, KnowledgeEngine, Rule, MATCH, TEST
 
 
 # Логирование

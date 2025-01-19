@@ -1,163 +1,122 @@
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
+from experta import Fact, KnowledgeEngine, Rule, MATCH, TEST
+from typing import List
+import requests
+import logging
 import collections
 if not hasattr(collections, "Mapping"):
     import collections.abc
     collections.Mapping = collections.abc.Mapping
 
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-import requests
-from typing import List, Optional
-import logging
-from experta import Fact, KnowledgeEngine, Rule, MATCH, TEST
 
-# Настройка логирования
+# Логирование
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Создаем FastAPI приложение
+# Инициализация FastAPI
 app = FastAPI()
 
-# Модели данных для входящих запросов
-class JobSearchRequest(BaseModel):
-    salary: Optional[int] = None  # Делаем параметр зарплаты опциональным
-    text: str  # Текстовый запрос для поиска по ключевым словам (например, должность)
+# Модели запросов и ответов
+class FlightSearchRequest(BaseModel):
+    origin: str
+    destination: str
+    departure_at: str
+    return_at: str = None  # Опционально
+    one_way: bool = True
+    currency: str = "rub"
+    limit: int = 30
+    sorting: str = "price"
 
-# Модели данных для вакансий
-class VacancyResponse(BaseModel):
-    position: str
-    company: str
-    location: str
-    from_salary: int
-    to_salary: int
-    currency: str
-    link: str  # Добавляем ссылку на вакансию
+class FlightResponse(BaseModel):
+    price: float
+    link: str
+
+# Факты и движок знаний
+class Flight(Fact):
+    origin: str
+    destination: str
+    price: float
+    link: str
+
+class FlightCriteria(Fact):
+    origin: str
+    destination: str
+
+class MatchedFlight(Fact):
+    origin: str
+    destination: str
+    price: float
+    link: str
+
+class FlightEngine(KnowledgeEngine):
+    @Rule(
+        Flight(origin=MATCH.origin, destination=MATCH.destination, price=MATCH.price, link=MATCH.link),
+        FlightCriteria(origin=MATCH.origin, destination=MATCH.destination)
+    )
+    def match_flight(self, origin, destination, price, link):
+        self.declare(MatchedFlight(origin=origin, destination=destination, price=price, link=link))
 
 # Логирование всех запросов
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Миддлвэр для логирования всех входящих запросов."""
     logging.info(f"Получен запрос: {request.method} {request.url}")
     try:
         body = await request.json()
         logging.info(f"Тело запроса: {body}")
     except Exception:
-        logging.info("Тело запроса: отсутствует или недоступно")
+        logging.info("Тело запроса отсутствует или недоступно")
     response = await call_next(request)
     return response
 
-# Факты и движок знаний
-class User(Fact):
-    salaryPrefer: Optional[int]
-
-class Vacancy(Fact):
-    position: str
-    company: str
-    location: str
-    from_salary: int
-    to_salary: int
-
-class InputLocation(Fact):
-    inputLocation: str
-
-class AnswerVacancies(Fact):
-    position: str
-    company: str
-    location: str
-    from_salary: int
-    to_salary: int
-
-class VacancyEngine(KnowledgeEngine):
-    @Rule(
-        User(salaryPrefer=MATCH.salaryPrefer),
-        InputLocation(inputLocation=MATCH.inputLocation),
-        Vacancy(
-            position=MATCH.position,
-            company=MATCH.company,
-            location=MATCH.location,
-            from_salary=MATCH.from_salary,
-            to_salary=MATCH.to_salary,
-        ),
-        TEST(lambda salaryPrefer, from_salary, to_salary, inputLocation, location:
-             (salaryPrefer is None or (salaryPrefer >= from_salary and salaryPrefer <= to_salary)) and location == inputLocation)
+# Эндпоинт поиска авиабилетов
+@app.post("/search_flights", response_model=List[FlightResponse])
+async def search_flights(request: FlightSearchRequest):
+    departure_at = request.departure_at.split("T")[0] if request.departure_at else None
+    return_at = request.return_at.split("T")[0] if request.return_at else None
+    token = "74d50d2720af4296189110fe2639ae75"
+    api_url = (
+        f"https://api.travelpayouts.com/aviasales/v3/prices_for_dates?"
+        f"origin={request.origin}&destination={request.destination}&currency={request.currency}&limit={request.limit}"
+        f"&sorting={request.sorting}&one_way={str(request.one_way).lower()}"
+        f"{'&departure_at=' + request.departure_at if request.departure_at else ''}"
+        f"{'&return_at=' + request.return_at if request.return_at else ''}"
+        f"&token={token}"
     )
-    def job_matching_by_salary_and_location(self, salaryPrefer, inputLocation, position, company, location, from_salary, to_salary):
-        """Подбор вакансий по зарплате и местоположению одновременно."""
-        self.declare(
-            AnswerVacancies(
-                position=position,
-                company=company,
-                location=location,
-                from_salary=from_salary,
-                to_salary=to_salary,
-            )
-        )
 
-# Эндпоинт для поиска вакансий
-@app.post("/find_jobs", response_model=List[VacancyResponse])
-async def find_jobs(request: JobSearchRequest):
-    logging.info(f"Получен запрос find_jobs с данными: {request.dict()}")
-    
-    salary = request.salary  # Используем зарплату из запроса, если она указана
-    text = request.text  # Используем текстовый запрос для поиска
-    
-    url = "https://api.hh.ru/vacancies"
-    params = {
-        "text": text,  # Передаем текст для поиска по вакансиям
-        "salary": salary if salary is not None else None,  # Указываем зарплату, если передана
-        "per_page": 25,  # Количество вакансий на странице
-    }
-    
     try:
-        logging.info(f"Запрос к API HH с параметрами: {params}")
-        response = requests.get(url, params=params)
+        logging.info(f"Запрос к API Travelpayouts: {api_url}")
+        response = requests.get(api_url)
         response.raise_for_status()
-        logging.info(f"Ответ от API HH: {response.status_code}")
-        
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Ошибка при запросе к API HH: {str(e)}")
-        raise HTTPException(status_code=500, detail="Ошибка при получении данных с HH")
-    
-    vacancies_data = response.json()
-    logging.info(f"Ответ от HH: {vacancies_data}")
-    
-    if "items" not in vacancies_data or not vacancies_data["items"]:
-        logging.warning("Нет вакансий в ответе.")
+    except requests.RequestException as e:
+        logging.error(f"Ошибка при вызове API: {str(e)}")
+        raise HTTPException(status_code=500, detail="Ошибка при вызове API")
+
+    flights_data = response.json()
+    if "data" not in flights_data or not flights_data["data"]:
+        logging.warning("Нет доступных билетов.")
         return []
 
-    vacancies = []
-    engine = VacancyEngine()
+    # Инициализация движка знаний
+    engine = FlightEngine()
     engine.reset()
 
-    for vacancy in vacancies_data.get("items", []):
-        position = vacancy.get("name")
-        company = vacancy.get("employer", {}).get("name")
-        location = vacancy.get("area", {}).get("name")
-        salary_data = vacancy.get("salary", {})
-        salary_from = salary_data.get("from") if salary_data else None
-        salary_to = salary_data.get("to") if salary_data else None
-        
-        engine.declare(Vacancy(
-            position=position,
-            company=company,
-            location=location,
-            from_salary=salary_from if salary_from is not None else 0,
-            to_salary=salary_to if salary_to is not None else 0,
+    # Добавление данных в движок знаний
+    for flight in flights_data["data"]:
+        engine.declare(Flight(
+            origin=request.origin,
+            destination=request.destination,
+            price=flight["price"],
+            link=f"https://www.aviasales.ru/{flight['link']}"
         ))
 
-    engine.declare(User(salaryPrefer=salary))
-    engine.declare(InputLocation(inputLocation="Москва"))  # Для примера: фиксированное значение
-
+    # Задание критериев поиска
+    engine.declare(FlightCriteria(origin=request.origin, destination=request.destination))
     engine.run()
 
+    # Сбор данных из движка знаний
+    matched_flights = []
     for fact in engine.facts.values():
-        if isinstance(fact, AnswerVacancies):
-            vacancies.append(VacancyResponse(
-                position=fact["position"],
-                company=fact["company"],
-                location=fact["location"],
-                from_salary=fact["from_salary"],
-                to_salary=fact["to_salary"],
-                currency="RUR",
-                link=""  # Нет данных о ссылке в данном примере
-            ))
-    
-    return vacancies
+        if isinstance(fact, MatchedFlight):
+            matched_flights.append(FlightResponse(price=fact["price"], link=fact["link"]))
+
+    return matched_flights

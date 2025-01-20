@@ -1,11 +1,6 @@
-import collections
-if not hasattr(collections, "Mapping"):
-    import collections.abc
-    collections.Mapping = collections.abc.Mapping
-
+import logging
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
-import logging
 from experta import KnowledgeEngine, Fact, Rule, MATCH
 
 # Инициализация приложения FastAPI
@@ -35,13 +30,12 @@ plants = [
     {"name": "Нарцисс", "color": "желтый", "size": "маленький", "type": "цветок", "link": "-"},
     {"name": "Фиалка", "color": "синий", "size": "маленький", "type": "цветок", "link": "-"},
     {"name": "Гладиолус", "color": "красный", "size": "большой", "type": "цветок", "link": "-"},
-    {"name": "Мирт", "color": "зеленый", "size": "маленький", "type": "цветок", "link": "https://elovpark.ru/product/%d1%85%d0%be%d1%81%d1%82%d0%b0-%d0%bb%d0%b8%d0%b1%d0%b5%d1%80%d1%82%d0%b8/"},
+    {"name": "Мирт", "color": "зеленый", "size": "маленький", "type": "цветок", "link": "-"},
     {"name": "Цинерария", "color": "синий", "size": "средний", "type": "цветок", "link": "-"},
     {"name": "Клематис", "color": "белый", "size": "большой", "type": "цветок", "link": "-"},
     {"name": "Лаванда", "color": "синий", "size": "средний", "type": "цветок", "link": "-"}
 ]
 
-# Модель запроса для получения данных от пользователя
 class PlantQuery(BaseModel):
     color: str
     size: str
@@ -52,6 +46,8 @@ class PlantFact(Fact):
     color = ""
     size = ""
     type = ""
+    name = ""
+    link = ""
 
 class PlantEngine(KnowledgeEngine):
     def __init__(self, query):
@@ -60,37 +56,40 @@ class PlantEngine(KnowledgeEngine):
         self.results = []
 
     def add_facts(self):
-        """Добавляем факты о растениях, соответствующие запросу."""
+        """Добавляем факты о растениях."""
         for plant in plants:
-            # Добавляем факты о растениях, которые соответствуют запросу
-            if plant["color"] == self.query.color and plant["size"] == self.query.size and plant["type"] == self.query.type:
-                self.declare(PlantFact(
-                    color=plant["color"],
-                    size=plant["size"],
-                    type=plant["type"],
-                ))
+            self.declare(PlantFact(
+                name=plant["name"],
+                color=plant["color"],
+                size=plant["size"],
+                type=plant["type"],
+                link=plant["link"]
+            ))
 
-    @Rule(PlantFact(color=MATCH.color, size=MATCH.size, type=MATCH.type), salience=1)
-    def match_plant(self, color, size, type):
+    @Rule(PlantFact(color=MATCH.color, size=MATCH.size, type=MATCH.type),
+          salience=1)
+    def match_plant(self, color, size, type, name, link):
         """Правило для нахождения подходящего растения."""
-        self.results.append({"color": color, "size": size, "type": type})
+        if (color == self.query.color and
+                size == self.query.size and
+                type == self.query.type):
+            # Добавляем все параметры в результат
+            self.results.append({
+                "color": color,
+                "size": size,
+                "type": type,
+                "name": name,
+                "link": link
+            })
 
 @app.post("/find_plants")
 async def find_plants(query: PlantQuery, request: Request):
     """Эндпоинт для поиска растений по параметрам с использованием experta."""
-    
     # Логирование входящего запроса (полное тело запроса)
     request_body = await request.body()
     logger.info(f"Получен запрос от {request.client.host}: {request_body.decode()}")
 
-    # Логирование всех параметров запроса
-    try:
-        json_data = await request.json()  # Получаем данные запроса в формате JSON
-        logger.info(f"Параметры запроса: {json_data}")
-    except Exception as e:
-        logger.error(f"Ошибка при получении JSON данных: {str(e)}")
-
-    # Инициализация движка
+    # Инициализация экспертной системы
     plant_engine = PlantEngine(query)
 
     # Добавление фактов и запуск правил

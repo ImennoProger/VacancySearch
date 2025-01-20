@@ -1,3 +1,8 @@
+import collections
+if not hasattr(collections, "Mapping"):
+    import collections.abc
+    collections.Mapping = collections.abc.Mapping
+
 import logging
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel

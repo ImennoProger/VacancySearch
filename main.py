@@ -61,18 +61,42 @@ class PlantEngine(KnowledgeEngine):
         self.query = query
         self.results = []
 
-    @Rule(PlantFact(color="${query.color}", size="${query.size}", type="${query.type}"))
-    def match_plant(self):
-        self.results.append("Plant matched")
+    def add_facts(self):
+        """Добавляем факты о растениях."""
+        for plant in plants:
+            self.declare(PlantFact(
+                name=plant["name"],
+                color=plant["color"],
+                size=plant["size"],
+                type=plant["type"],
+                link=plant["link"]
+            ))
+
+    @Rule(PlantFact(color=MATCH.color, size=MATCH.size, type=MATCH.type),
+          salience=1)
+    def match_plant(self, color, size, type, name, link):
+        """Правило для нахождения подходящего растения."""
+        if (color == self.query.color and
+                size == self.query.size and
+                type == self.query.type):
+            self.results.append({"name": name, "link": link})
 
 @app.post("/find_plants")
 async def find_plants(query: PlantQuery, request: Request):
-    """Эндпоинт для поиска растений по параметрам."""
+    """Эндпоинт для поиска растений по параметрам с использованием experta."""
     # Логирование входящего запроса
     logger.info(f"Получен запрос от {request.client.host}: {query}")
 
-    # Запуск экспертной системы
+    # Инициализация экспертной системы
     plant_engine = PlantEngine(query)
-    results = [PlantFact(link=plant)]
+
+    # Добавление фактов и запуск правил
+    plant_engine.reset()
+    plant_engine.add_facts()
     plant_engine.run()
-    return {"results": results}
+
+    # Формирование ответа
+    if not plant_engine.results:
+        raise HTTPException(status_code=404, detail="Растения не найдены")
+
+    return {"results": plant_engine.results}

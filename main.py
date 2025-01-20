@@ -52,8 +52,6 @@ class PlantFact(Fact):
     color = ""
     size = ""
     type = ""
-    name = ""
-    link = ""
 
 class PlantEngine(KnowledgeEngine):
     def __init__(self, query):
@@ -70,14 +68,12 @@ class PlantEngine(KnowledgeEngine):
                     color=plant["color"],
                     size=plant["size"],
                     type=plant["type"],
-                    name=plant["name"],
-                    link=plant["link"]
                 ))
 
     @Rule(PlantFact(color=MATCH.color, size=MATCH.size, type=MATCH.type), salience=1)
-    def match_plant(self, color, size, type, name, link):
+    def match_plant(self, color, size, type):
         """Правило для нахождения подходящего растения."""
-        self.results.append({"name": name, "link": link})
+        self.results.append({"color": color, "size": size, "type": type})
 
 @app.post("/find_plants")
 async def find_plants(query: PlantQuery, request: Request):

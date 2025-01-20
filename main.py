@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import List
 import logging
-from experta import KnowledgeEngine, Fact, Rule
+from experta import KnowledgeEngine, Fact, Rule, MATCH
 
 # Инициализация приложения FastAPI
 app = FastAPI()

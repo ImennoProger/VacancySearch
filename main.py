@@ -65,11 +65,9 @@ class PlantEngine(KnowledgeEngine):
         """Добавляем факты о растениях."""
         for plant in plants:
             self.declare(PlantFact(
-                name=plant["name"],
                 color=plant["color"],
                 size=plant["size"],
                 type=plant["type"],
-                link=plant["link"]
             ))
 
     @Rule(PlantFact(color=MATCH.color, size=MATCH.size, type=MATCH.type),

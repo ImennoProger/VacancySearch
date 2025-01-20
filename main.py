@@ -1,163 +1,73 @@
-import collections
-if not hasattr(collections, "Mapping"):
-    import collections.abc
-    collections.Mapping = collections.abc.Mapping
-
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
-import requests
-from typing import List, Optional
+from typing import List
 import logging
-from experta import Fact, KnowledgeEngine, Rule, MATCH, TEST
+from experta import KnowledgeEngine, Fact, Rule
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-# Создаем FastAPI приложение
+# Инициализация приложения FastAPI
 app = FastAPI()
 
-# Модели данных для входящих запросов
-class JobSearchRequest(BaseModel):
-    salary: Optional[int] = None  # Делаем параметр зарплаты опциональным
-    text: str  # Текстовый запрос для поиска по ключевым словам (например, должность)
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+logger = logging.getLogger(__name__)
 
-# Модели данных для вакансий
-class VacancyResponse(BaseModel):
-    position: str
-    company: str
-    location: str
-    from_salary: int
-    to_salary: int
-    currency: str
-    link: str  # Добавляем ссылку на вакансию
+# Данные о растениях
+plants = [
+    {"name": "Роза", "color": "красный", "size": "маленький", "type": "цветок", "link": "-"},
+    {"name": "Либерти", "color": "зеленый", "size": "средний", "type": "кустарник", "link": "https://elovpark.ru/product/%d1%85%d0%be%d1%81%d1%82%d0%b0-%d0%bb%d0%b8%d0%b1%d0%b5%d1%80%d1%82%d0%b8/"},
+    {"name": "Вербейник", "color": "желтый", "size": "средний", "type": "цветок", "link": "https://elovpark.ru/product/%d0%b2%d0%b5%d1%80%d0%b1%d0%b5%d0%b9%d0%bd%d0%b8%d0%ba-%d1%82%d0%be%d1%87%d0%b5%d1%87%d0%bd%d1%8b%d0%b9/"},
+    {"name": "Тюльпан", "color": "желтый", "size": "средний", "type": "цветок", "link": "-"},
+    {"name": "Барбарис", "color": "красный", "size": "большой", "type": "кустарник", "link": "https://elovpark.ru/product/%d0%b1%d0%b0%d1%80%d0%b1%d0%b0%d1%80%d0%b8%d1%81-%d1%82%d1%83%d0%bd%d0%b1%d0%b5%d1%80%d0%b3%d0%b0-%d0%b0%d1%82%d1%80%d0%be%d0%bf%d1%83%d1%80%d0%bf%d1%83%d1%80%d0%b5%d0%b0/"},
+    {"name": "Бадан", "color": "розовый", "size": "маленький", "type": "цветок", "link": "https://elovpark.ru/product/%d0%b1%d0%b0%d0%b4%d0%b0%d0%bd-%d1%82%d0%be%d0%bb%d1%81%d1%82%d0%be%d0%bb%d0%b8%d%d0%b8%d1%81%d1%82%d0%bd%d1%8b%d0%b9/"},
+    {"name": "Кактус", "color": "зеленый", "size": "маленький", "type": "цветок", "link": "-"},
+    {"name": "Орхидея", "color": "белый", "size": "маленький", "type": "цветок", "link": "-"},
+    {"name": "Медуница", "color": "синий", "size": "маленький", "type": "цветок", "link": "https://elovpark.ru/product/%d0%bc%d0%b5%d0%b4%d1%83%d0%bd%d0%b8%d1%86%d0%b0-%d1%81%d0%b0%d1%85%d0%b0%d1%80%d0%bd%d0%b0%d1%8f-%d0%bc%d0%b8%d1%81%d1%81%d0%b8%d1%81-%d0%bc%d1%83%d0%bd/"},
+    {"name": "Пион", "color": "красный", "size": "маленький", "type": "цветок", "link": "https://elovpark.ru/product/%d0%bf%d0%b8%d0%be%d0%bd-%d1%82%d0%be%d0%bd%d0%ba%d0%be%d0%bb%d0%b8%d1%81%d1%82%d0%bd%d1%8b%d0%b9/"},
+    {"name": "Ирис Вайт Ледис", "color": "белый", "size": "средний", "type": "цветок", "link": "https://elovpark.ru/product/%d0%b8%d1%80%d0%b8%d1%81-%d0%b2%d0%b0%d0%b9%d1%82-%d0%bb%d0%b5%d0%b4%d0%b8%d1%81/"},
+    {"name": "Астра", "color": "красный", "size": "средний", "type": "цветок", "link": "-"},
+    {"name": "Бегония", "color": "розовый", "size": "маленький", "type": "цветок", "link": "-"},
+    {"name": "Каллы", "color": "белый", "size": "средний", "type": "цветок", "link": "-"},
+    {"name": "Пальма", "color": "зеленый", "size": "большой", "type": "дерево", "link": "-"},
+    {"name": "Нарцисс", "color": "желтый", "size": "маленький", "type": "цветок", "link": "-"},
+    {"name": "Фиалка", "color": "синий", "size": "маленький", "type": "цветок", "link": "-"},
+    {"name": "Гладиолус", "color": "красный", "size": "большой", "type": "цветок", "link": "-"},
+    {"name": "Мирт", "color": "зеленый", "size": "маленький", "type": "цветок", "link": "-"},
+    {"name": "Цинерария", "color": "синий", "size": "средний", "type": "цветок", "link": "-"},
+    {"name": "Клематис", "color": "белый", "size": "большой", "type": "цветок", "link": "-"},
+    {"name": "Лаванда", "color": "синий", "size": "средний", "type": "цветок", "link": "-"}
+]
 
-# Логирование всех запросов
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Миддлвэр для логирования всех входящих запросов."""
-    logging.info(f"Получен запрос: {request.method} {request.url}")
-    try:
-        body = await request.json()
-        logging.info(f"Тело запроса: {body}")
-    except Exception:
-        logging.info("Тело запроса: отсутствует или недоступно")
-    response = await call_next(request)
-    return response
+class PlantQuery(BaseModel):
+    color: str
+    size: str
+    type: str
 
-# Факты и движок знаний
-class User(Fact):
-    salaryPrefer: Optional[int]
+class PlantFact(Fact):
+    """Факт, описывающий растение."""
+    name = ""
+    color = ""
+    size = ""
+    type = ""
+    link = ""
 
-class Vacancy(Fact):
-    position: str
-    company: str
-    location: str
-    from_salary: int
-    to_salary: int
+class PlantEngine(KnowledgeEngine):
+    def __init__(self, query):
+        super().__init__()
+        self.query = query
+        self.results = []
 
-class InputLocation(Fact):
-    inputLocation: str
+    @Rule(PlantFact(color="${query.color}", size="${query.size}", type="${query.type}"))
+    def match_plant(self):
+        self.results.append("Plant matched")
 
-class AnswerVacancies(Fact):
-    position: str
-    company: str
-    location: str
-    from_salary: int
-    to_salary: int
+@app.post("/find_plants")
+async def find_plants(query: PlantQuery, request: Request):
+    """Эндпоинт для поиска растений по параметрам."""
+    # Логирование входящего запроса
+    logger.info(f"Получен запрос от {request.client.host}: {query}")
 
-class VacancyEngine(KnowledgeEngine):
-    @Rule(
-        User(salaryPrefer=MATCH.salaryPrefer),
-        InputLocation(inputLocation=MATCH.inputLocation),
-        Vacancy(
-            position=MATCH.position,
-            company=MATCH.company,
-            location=MATCH.location,
-            from_salary=MATCH.from_salary,
-            to_salary=MATCH.to_salary,
-        ),
-        TEST(lambda salaryPrefer, from_salary, to_salary, inputLocation, location:
-             (salaryPrefer is None or (salaryPrefer >= from_salary and salaryPrefer <= to_salary)) and location == inputLocation)
-    )
-    def job_matching_by_salary_and_location(self, salaryPrefer, inputLocation, position, company, location, from_salary, to_salary):
-        """Подбор вакансий по зарплате и местоположению одновременно."""
-        self.declare(
-            AnswerVacancies(
-                position=position,
-                company=company,
-                location=location,
-                from_salary=from_salary,
-                to_salary=to_salary,
-            )
-        )
-
-# Эндпоинт для поиска вакансий
-@app.post("/find_jobs", response_model=List[VacancyResponse])
-async def find_jobs(request: JobSearchRequest):
-    logging.info(f"Получен запрос find_jobs с данными: {request.dict()}")
-    
-    salary = request.salary  # Используем зарплату из запроса, если она указана
-    text = request.text  # Используем текстовый запрос для поиска
-    
-    url = "https://api.hh.ru/vacancies"
-    params = {
-        "text": text,  # Передаем текст для поиска по вакансиям
-        "salary": salary if salary is not None else None,  # Указываем зарплату, если передана
-        "per_page": 25,  # Количество вакансий на странице
-    }
-    
-    try:
-        logging.info(f"Запрос к API HH с параметрами: {params}")
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        logging.info(f"Ответ от API HH: {response.status_code}")
-        
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Ошибка при запросе к API HH: {str(e)}")
-        raise HTTPException(status_code=500, detail="Ошибка при получении данных с HH")
-    
-    vacancies_data = response.json()
-    logging.info(f"Ответ от HH: {vacancies_data}")
-    
-    if "items" not in vacancies_data or not vacancies_data["items"]:
-        logging.warning("Нет вакансий в ответе.")
-        return []
-
-    vacancies = []
-    engine = VacancyEngine()
-    engine.reset()
-
-    for vacancy in vacancies_data.get("items", []):
-        position = vacancy.get("name")
-        company = vacancy.get("employer", {}).get("name")
-        location = vacancy.get("area", {}).get("name")
-        salary_data = vacancy.get("salary", {})
-        salary_from = salary_data.get("from") if salary_data else None
-        salary_to = salary_data.get("to") if salary_data else None
-        
-        engine.declare(Vacancy(
-            position=position,
-            company=company,
-            location=location,
-            from_salary=salary_from if salary_from is not None else 0,
-            to_salary=salary_to if salary_to is not None else 0,
-        ))
-
-    engine.declare(User(salaryPrefer=salary))
-    engine.declare(InputLocation(inputLocation="Москва"))  # Для примера: фиксированное значение
-
-    engine.run()
-
-    for fact in engine.facts.values():
-        if isinstance(fact, AnswerVacancies):
-            vacancies.append(VacancyResponse(
-                position=fact["position"],
-                company=fact["company"],
-                location=fact["location"],
-                from_salary=fact["from_salary"],
-                to_salary=fact["to_salary"],
-                currency="RUR",
-                link=""  # Нет данных о ссылке в данном примере
-            ))
-    
-    return vacancies
+    # Запуск экспертной системы
+    plant_engine = PlantEngine(query)
+    results = [PlantFact(link=plant)]
+    plant_engine.run()
+    return {"results": results}

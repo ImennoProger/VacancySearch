@@ -87,6 +87,13 @@ async def find_plants(query: PlantQuery, request: Request):
     request_body = await request.body()
     logger.info(f"Получен запрос от {request.client.host}: {request_body.decode()}")
 
+    # Логирование всех параметров запроса
+    try:
+        json_data = await request.json()  # Получаем данные запроса в формате JSON
+        logger.info(f"Параметры запроса: {json_data}")
+    except Exception as e:
+        logger.error(f"Ошибка при получении JSON данных: {str(e)}")
+
     # Инициализация движка
     plant_engine = PlantEngine(query)
 

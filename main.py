@@ -1,8 +1,3 @@
-import collections
-if not hasattr(collections, "Mapping"):
-    import collections.abc
-    collections.Mapping = collections.abc.Mapping
-    
 import logging
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
@@ -45,7 +40,6 @@ class PlantEngine(KnowledgeEngine):
     def add_facts(self):
         """Добавляем факты о растениях."""
         for plant in plants:
-            # Передаем все данные, включая name и link
             self.declare(PlantFact(
                 name=plant["name"],
                 color=plant["color"],
@@ -54,14 +48,12 @@ class PlantEngine(KnowledgeEngine):
                 link=plant["link"]
             ))
 
-    @Rule(PlantFact(color=MATCH.color, size=MATCH.size, type=MATCH.type),
-          salience=1)
+    @Rule(PlantFact(color=MATCH.color, size=MATCH.size, type=MATCH.type, name=MATCH.name, link=MATCH.link))
     def match_plant(self, color, size, type, name, link):
         """Правило для нахождения подходящего растения."""
         if (color == self.query.color and
                 size == self.query.size and
                 type == self.query.type):
-            # Добавляем все параметры в результат
             self.results.append({
                 "color": color,
                 "size": size,
